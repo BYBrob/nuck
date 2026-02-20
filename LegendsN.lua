@@ -355,6 +355,49 @@ tabFarm:CreateToggle({
 })
 
 tabFarm:CreateToggle({
+    Name = "Auto Farm Gemas (Winter Wonderland Chest)",
+    CurrentValue = false,
+    Callback = function(state)
+        _G.farmGems = state
+        if state then
+            task.spawn(function()
+                -- Gemas vem do chest da Winter Wonderland Island e de crates no chao
+                -- Tenta pegar os crates de gemas que spawnam no workspace
+                while _G.farmGems do
+                    task.wait()
+                    pcall(function()
+                        -- Tenta coletar crates de gema em todas as areas
+                        for _, folder in pairs(workspace.spawnedCoins:GetChildren()) do
+                            for _, v in pairs(folder:GetChildren()) do
+                                if not _G.farmGems then break end
+                                if v.Name:lower():find("gem") or v.Name == "Green Gem Crate" or v.Name == "Gem Crate" then
+                                    LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(v.Position)
+                                    task.wait(0.16)
+                                end
+                            end
+                        end
+                    end)
+                    -- Tambem tenta pegar o chest da Winter Wonderland que da gemas
+                    pcall(function()
+                        local wwChest = workspace:FindFirstChild("Winter Wonderland Island")
+                        if wwChest then
+                            for _, v in pairs(wwChest:GetDescendants()) do
+                                if not _G.farmGems then break end
+                                if (v.Name:lower():find("chest") or v.Name:lower():find("reward")) and v:IsA("BasePart") then
+                                    LocalPlayer.Character.HumanoidRootPart.CFrame = v.CFrame * CFrame.new(0, 3, 0)
+                                    task.wait(0.3)
+                                end
+                            end
+                        end
+                    end)
+                    task.wait(0.5)
+                end
+            end)
+        end
+    end
+})
+
+tabFarm:CreateToggle({
     Name = "Auto Hoops",
     CurrentValue = false,
     Callback = function(state)
@@ -596,31 +639,52 @@ tabPets:CreateToggle({
     Callback = function(state)
         _G.autoBuyPet = state
         if state then
+            if not selectedCrystalName then
+                Rayfield:Notify({ Title = "Erro", Content = "Selecione um cristal primeiro!", Duration = 3 })
+                _G.autoBuyPet = false
+                return
+            end
             task.spawn(function()
-                -- Teleporta ATÉ o cristal no workspace antes de começar
-                pcall(function()
-                    if selectedCrystalName then
-                        local crystalModel = workspace.mapCrystalsFolder:FindFirstChild(selectedCrystalName)
-                        if crystalModel then
-                            -- Tenta achar a parte principal do modelo
-                            local part = crystalModel:IsA("BasePart") and crystalModel
-                                or crystalModel:FindFirstChildWhichIsA("BasePart")
-                            if part then
-                                LocalPlayer.Character:WaitForChild("HumanoidRootPart").CFrame =
-                                    part.CFrame * CFrame.new(0, 2, -5)
-                                task.wait(0.6)
-                            end
-                        end
+                -- Passo 1: teleporta para dentro da area do cristal
+                -- O jogo usa a shopAreaCircle pra detectar proximidade, tentamos varios offsets
+                local function tpToCrystal()
+                    local crystalModel = workspace.mapCrystalsFolder:FindFirstChild(selectedCrystalName)
+                    if not crystalModel then return false end
+                    local part = crystalModel:IsA("BasePart") and crystalModel
+                        or crystalModel:FindFirstChildWhichIsA("BasePart")
+                    if not part then return false end
+                    local hrp = LocalPlayer.Character:WaitForChild("HumanoidRootPart")
+                    -- Tenta varios offsets pra garantir que cai dentro do raio de compra
+                    for _, offset in ipairs({ CFrame.new(0,2,0), CFrame.new(0,2,-4), CFrame.new(0,2,4), CFrame.new(-4,2,0), CFrame.new(4,2,0) }) do
+                        hrp.CFrame = part.CFrame * offset
+                        task.wait(0.15)
                     end
-                end)
+                    hrp.CFrame = part.CFrame * CFrame.new(0, 2, 0) -- fica no centro
+                    return true
+                end
 
-                -- Loop de compra — chama o remote exato igual todos os scripts reais
+                local ok = tpToCrystal()
+                if not ok then
+                    Rayfield:Notify({ Title = "Erro", Content = "Cristal nao encontrado no workspace.", Duration = 3 })
+                    _G.autoBuyPet = false
+                    return
+                end
+                task.wait(0.5)
+
+                Rayfield:Notify({ Title = "Auto Buy", Content = "Comprando: " .. selectedCrystalName, Duration = 3 })
+
+                -- Passo 2: loop de compra + mantem TP no cristal a cada 2s
+                local tpTimer = 0
                 while _G.autoBuyPet do
                     task.wait(0.05)
+                    tpTimer = tpTimer + 0.05
+                    -- A cada 2 segundos reteleporta pro cristal caso seja empurrado
+                    if tpTimer >= 2 then
+                        tpTimer = 0
+                        pcall(tpToCrystal)
+                    end
                     pcall(function()
-                        if selectedCrystalName then
-                            rEvents.openCrystalRemote:InvokeServer("openCrystal", selectedCrystalName)
-                        end
+                        rEvents.openCrystalRemote:InvokeServer("openCrystal", selectedCrystalName)
                     end)
                 end
             end)
@@ -832,27 +896,33 @@ end
 
 tabTP:CreateSection("Ilhas")
 
+-- Dropdown JA teleporta ao selecionar, sem precisar apertar botao
 tabTP:CreateDropdown({
-    Name = "Teleportar para Ilha",
+    Name = "Selecionar Ilha (TP imediato)",
     Options = ISLAND, CurrentOption = {}, MultipleOptions = false,
     Callback = function(a)
         pcall(function()
-            LocalPlayer.Character.HumanoidRootPart.CFrame = workspace.islandUnlockParts[a].islandSignPart.CFrame
+            LocalPlayer.Character:WaitForChild("HumanoidRootPart").CFrame =
+                workspace.islandUnlockParts[a].islandSignPart.CFrame
         end)
+        Rayfield:Notify({ Title = "Teleporte", Content = "Indo para: " .. a, Duration = 2 })
     end
 })
 
+-- Unlock All com 0.7s entre cada ilha pra o servidor registrar direito
 tabTP:CreateButton({
     Name = "Desbloquear Todas as Ilhas",
     Callback = function()
         task.spawn(function()
+            local total = 0
             for _, v in ipairs(workspace.islandUnlockParts:GetChildren()) do
                 pcall(function()
                     LocalPlayer.Character.HumanoidRootPart.CFrame = v.islandSignPart.CFrame
+                    total = total + 1
                 end)
-                task.wait(0.2)
+                task.wait(0.7)
             end
-            Rayfield:Notify({ Title = "Sucesso", Content = "Todas as ilhas desbloqueadas!", Duration = 3 })
+            Rayfield:Notify({ Title = "Concluido!", Content = tostring(total) .. " ilhas desbloqueadas!", Duration = 4 })
         end)
     end
 })
