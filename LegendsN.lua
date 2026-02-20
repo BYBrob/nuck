@@ -542,6 +542,133 @@ tabBoss:CreateToggle({
 --                     ABA: PETS
 -- ═══════════════════════════════════════════════════════
 
+tabPets:CreateSection("Comprar Pets")
+
+-- ════ AUTO BUY PET ════
+-- Cristais com preços em Coins (baseado no jogo real)
+local PET_SHOP = {
+    { name = "Blue Crystal",      price = 100         },
+    { name = "Purple Crystal",    price = 500         },
+    { name = "Orange Crystal",    price = 2500        },
+    { name = "Enchanted Crystal", price = 10000       },
+    { name = "Astral Crystal",    price = 50000       },
+    { name = "Golden Crystal",    price = 250000      },
+    { name = "Inferno Crystal",   price = 1000000     },
+    { name = "Galaxy Crystal",    price = 5000000     },
+    { name = "Frozen Crystal",    price = 25000000    },
+    { name = "Eternal Crystal",   price = 100000000   },
+    { name = "Storm Crystal",     price = 500000000   },
+    { name = "Thunder Crystal",   price = 2000000000  },
+    { name = "Legends Crystal",   price = 10000000000 },
+    { name = "Eternity Crystal",  price = 50000000000 },
+}
+
+local function FormatPrice(n)
+    if n >= 1000000000000 then return string.format("%.0fT", n/1000000000000)
+    elseif n >= 1000000000 then return string.format("%.0fB", n/1000000000)
+    elseif n >= 1000000    then return string.format("%.0fM", n/1000000)
+    elseif n >= 1000       then return string.format("%.0fK", n/1000)
+    else return tostring(n) end
+end
+
+local petShopOptions = {}
+local petBuyMapping  = {}
+for _, v in ipairs(PET_SHOP) do
+    local label = v.name .. "  [" .. FormatPrice(v.price) .. " Coins]"
+    table.insert(petShopOptions, label)
+    petBuyMapping[label] = v.name
+end
+
+local selectedPetBuy = nil
+
+tabPets:CreateDropdown({
+    Name = "Selecionar Crystal para Comprar",
+    Options = petShopOptions, CurrentOption = {}, MultipleOptions = false,
+    Callback = function(opt) selectedPetBuy = petBuyMapping[opt] end
+})
+
+tabPets:CreateToggle({
+    Name = "Auto Buy Pet (Crystal Loop)",
+    CurrentValue = false,
+    Callback = function(state)
+        _G.autoBuyPet = state
+        if state then
+            task.spawn(function()
+                while _G.autoBuyPet do
+                    task.wait(0.1)
+                    pcall(function()
+                        if selectedPetBuy then
+                            rEvents.openCrystalRemote:InvokeServer("openCrystal", selectedPetBuy)
+                        end
+                    end)
+                end
+            end)
+        end
+    end
+})
+
+tabPets:CreateSection("Equip Automático")
+
+-- ════ AUTO EQUIP MELHOR PET ════
+local RARITY_ORDER = {
+    Basic=1, Advanced=2, Rare=3, Epic=4,
+    Unique=5, Omega=6, Immortal=7, Legend=8
+}
+
+local function GetBestPet()
+    local bestPet, bestRarity = nil, 0
+    for _, folder in pairs(LocalPlayer.petsFolder:GetChildren()) do
+        local rank = RARITY_ORDER[folder.Name] or 0
+        if rank > bestRarity then
+            local children = folder:GetChildren()
+            if #children > 0 then
+                bestRarity = rank
+                bestPet = children[1]
+            end
+        end
+    end
+    return bestPet
+end
+
+tabPets:CreateToggle({
+    Name = "Auto Equip Melhor Pet (Loop)",
+    CurrentValue = false,
+    Callback = function(state)
+        _G.equipBest = state
+        if state then
+            task.spawn(function()
+                while _G.equipBest do
+                    task.wait(2)
+                    pcall(function()
+                        local best = GetBestPet()
+                        if best then
+                            rEvents.petEquipEvent:FireServer("equipPet", best.Name)
+                        end
+                    end)
+                end
+            end)
+        end
+    end
+})
+
+tabPets:CreateButton({
+    Name = "Equipar Melhor Pet (Uma vez)",
+    Callback = function()
+        local ok, err = pcall(function()
+            local best = GetBestPet()
+            if best then
+                rEvents.petEquipEvent:FireServer("equipPet", best.Name)
+                Rayfield:Notify({ Title = "Pets", Content = "Melhor pet equipado: " .. best.Name, Duration = 3 })
+            else
+                Rayfield:Notify({ Title = "Pets", Content = "Nenhum pet encontrado.", Duration = 2 })
+            end
+        end)
+        if not ok then
+            Rayfield:Notify({ Title = "Erro", Content = tostring(err), Duration = 3 })
+        end
+    end
+})
+
 tabPets:CreateSection("Evoluções de Pets")
 
 local function PetEventLoop(flagGetter, eventName, remoteName)
@@ -855,7 +982,7 @@ Rayfield:LoadConfiguration()
 
 Rayfield:Notify({
     Title = "Nuck Hub — VIP",
-    Content = "Script carregado! Anti-AFK ativo. Bom jogo, Nuck! 🥷",
+    Content = "Script carregado! Anti-AFK ativo. Bom jogo, " .. LocalPlayer.DisplayName .. "! 🥷",
     Duration = 5,
     Image = 6026568198,
 })
