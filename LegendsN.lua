@@ -545,46 +545,49 @@ tabBoss:CreateToggle({
 tabPets:CreateSection("Comprar Pets")
 
 -- ════ AUTO BUY PET ════
--- Cristais com preços em Coins (baseado no jogo real)
-local PET_SHOP = {
-    { name = "Blue Crystal",      price = 100         },
-    { name = "Purple Crystal",    price = 500         },
-    { name = "Orange Crystal",    price = 2500        },
-    { name = "Enchanted Crystal", price = 10000       },
-    { name = "Astral Crystal",    price = 50000       },
-    { name = "Golden Crystal",    price = 250000      },
-    { name = "Inferno Crystal",   price = 1000000     },
-    { name = "Galaxy Crystal",    price = 5000000     },
-    { name = "Frozen Crystal",    price = 25000000    },
-    { name = "Eternal Crystal",   price = 100000000   },
-    { name = "Storm Crystal",     price = 500000000   },
-    { name = "Thunder Crystal",   price = 2000000000  },
-    { name = "Legends Crystal",   price = 10000000000 },
-    { name = "Eternity Crystal",  price = 50000000000 },
+-- Pega os cristais DIRETAMENTE do workspace (nomes reais do jogo, sem hardcode)
+-- Preços aproximados apenas para exibição no label
+local CRYSTAL_PRICES = {
+    ["Blue Crystal"]      = "100",
+    ["Purple Crystal"]    = "500",
+    ["Orange Crystal"]    = "2.5K",
+    ["Enchanted Crystal"] = "10K",
+    ["Astral Crystal"]    = "50K",
+    ["Golden Crystal"]    = "250K",
+    ["Inferno Crystal"]   = "1M",
+    ["Galaxy Crystal"]    = "5M",
+    ["Frozen Crystal"]    = "25M",
+    ["Eternal Crystal"]   = "100M",
+    ["Storm Crystal"]     = "500M",
+    ["Thunder Crystal"]   = "2B",
+    ["Legends Crystal"]   = "10B",
+    ["Eternity Crystal"]  = "50B",
 }
 
-local function FormatPrice(n)
-    if n >= 1000000000000 then return string.format("%.0fT", n/1000000000000)
-    elseif n >= 1000000000 then return string.format("%.0fB", n/1000000000)
-    elseif n >= 1000000    then return string.format("%.0fM", n/1000000)
-    elseif n >= 1000       then return string.format("%.0fK", n/1000)
-    else return tostring(n) end
+-- Lê nomes reais do jogo em runtime
+local crystalNames = {}
+for _, v in pairs(workspace.mapCrystalsFolder:GetChildren()) do
+    table.insert(crystalNames, v.Name)
 end
 
-local petShopOptions = {}
-local petBuyMapping  = {}
-for _, v in ipairs(PET_SHOP) do
-    local label = v.name .. "  [" .. FormatPrice(v.price) .. " Coins]"
-    table.insert(petShopOptions, label)
-    petBuyMapping[label] = v.name
+-- Monta opções com preço do lado (se tiver no dicionário) ou nome limpo
+local crystalOptions = {}
+local crystalOptionToName = {}
+for _, name in ipairs(crystalNames) do
+    local price = CRYSTAL_PRICES[name]
+    local label = price and (name .. "  [" .. price .. " Coins]") or name
+    table.insert(crystalOptions, label)
+    crystalOptionToName[label] = name
 end
 
-local selectedPetBuy = nil
+local selectedCrystalName = crystalNames[1] or nil -- default: primeiro da lista
 
 tabPets:CreateDropdown({
     Name = "Selecionar Crystal para Comprar",
-    Options = petShopOptions, CurrentOption = {}, MultipleOptions = false,
-    Callback = function(opt) selectedPetBuy = petBuyMapping[opt] end
+    Options = crystalOptions, CurrentOption = {}, MultipleOptions = false,
+    Callback = function(opt)
+        selectedCrystalName = crystalOptionToName[opt] or opt
+    end
 })
 
 tabPets:CreateToggle({
@@ -594,11 +597,29 @@ tabPets:CreateToggle({
         _G.autoBuyPet = state
         if state then
             task.spawn(function()
+                -- Teleporta ATÉ o cristal no workspace antes de começar
+                pcall(function()
+                    if selectedCrystalName then
+                        local crystalModel = workspace.mapCrystalsFolder:FindFirstChild(selectedCrystalName)
+                        if crystalModel then
+                            -- Tenta achar a parte principal do modelo
+                            local part = crystalModel:IsA("BasePart") and crystalModel
+                                or crystalModel:FindFirstChildWhichIsA("BasePart")
+                            if part then
+                                LocalPlayer.Character:WaitForChild("HumanoidRootPart").CFrame =
+                                    part.CFrame * CFrame.new(0, 2, -5)
+                                task.wait(0.6)
+                            end
+                        end
+                    end
+                end)
+
+                -- Loop de compra — chama o remote exato igual todos os scripts reais
                 while _G.autoBuyPet do
-                    task.wait(0.1)
+                    task.wait(0.05)
                     pcall(function()
-                        if selectedPetBuy then
-                            rEvents.openCrystalRemote:InvokeServer("openCrystal", selectedPetBuy)
+                        if selectedCrystalName then
+                            rEvents.openCrystalRemote:InvokeServer("openCrystal", selectedCrystalName)
                         end
                     end)
                 end
@@ -610,23 +631,29 @@ tabPets:CreateToggle({
 tabPets:CreateSection("Equip Automático")
 
 -- ════ AUTO EQUIP MELHOR PET ════
+-- O jogo usa ninjaEvent:FireServer("equipPet", petObject)
+-- passando o OBJETO do pet (Instance), não só o nome
 local RARITY_ORDER = {
     Basic=1, Advanced=2, Rare=3, Epic=4,
-    Unique=5, Omega=6, Immortal=7, Legend=8
+    Unique=5, Omega=6, Immortal=7, Legend=8,
+    Infinity=9, Elite=10
 }
 
-local function GetBestPet()
+-- Retorna o OBJETO (Instance) do melhor pet no inventário do player
+local function GetBestPetInstance()
     local bestPet, bestRarity = nil, 0
-    for _, folder in pairs(LocalPlayer.petsFolder:GetChildren()) do
-        local rank = RARITY_ORDER[folder.Name] or 0
-        if rank > bestRarity then
-            local children = folder:GetChildren()
-            if #children > 0 then
-                bestRarity = rank
-                bestPet = children[1]
+    pcall(function()
+        for _, folder in pairs(LocalPlayer.petsFolder:GetChildren()) do
+            local rank = RARITY_ORDER[folder.Name] or 0
+            if rank > bestRarity then
+                local children = folder:GetChildren()
+                if #children > 0 then
+                    bestRarity = rank
+                    bestPet = children[1] -- Instance do pet
+                end
             end
         end
-    end
+    end)
     return bestPet
 end
 
@@ -638,11 +665,12 @@ tabPets:CreateToggle({
         if state then
             task.spawn(function()
                 while _G.equipBest do
-                    task.wait(2)
+                    task.wait(3)
                     pcall(function()
-                        local best = GetBestPet()
+                        local best = GetBestPetInstance()
                         if best then
-                            rEvents.petEquipEvent:FireServer("equipPet", best.Name)
+                            -- Passa o objeto direto, como o jogo espera
+                            ninjaEvent:FireServer("equipPet", best)
                         end
                     end)
                 end
@@ -654,18 +682,19 @@ tabPets:CreateToggle({
 tabPets:CreateButton({
     Name = "Equipar Melhor Pet (Uma vez)",
     Callback = function()
-        local ok, err = pcall(function()
-            local best = GetBestPet()
+        pcall(function()
+            local best = GetBestPetInstance()
             if best then
-                rEvents.petEquipEvent:FireServer("equipPet", best.Name)
-                Rayfield:Notify({ Title = "Pets", Content = "Melhor pet equipado: " .. best.Name, Duration = 3 })
+                ninjaEvent:FireServer("equipPet", best)
+                Rayfield:Notify({
+                    Title = "Pets ✓",
+                    Content = "Equipado: " .. best.Name .. " (melhor do inventário)",
+                    Duration = 3
+                })
             else
-                Rayfield:Notify({ Title = "Pets", Content = "Nenhum pet encontrado.", Duration = 2 })
+                Rayfield:Notify({ Title = "Pets", Content = "Nenhum pet no inventário.", Duration = 2 })
             end
         end)
-        if not ok then
-            Rayfield:Notify({ Title = "Erro", Content = tostring(err), Duration = 3 })
-        end
     end
 })
 
